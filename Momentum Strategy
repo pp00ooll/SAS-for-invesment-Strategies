@@ -1,6 +1,3 @@
-/**************************************************
-Assignment 10
-***************************************************/
 libname Agm10 'H:\MSFI 435\SAS\Lib\Agm10';
 
 %let wrds=wrds-cloud.wharton.upenn.edu 4016;
