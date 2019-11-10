@@ -1,0 +1,517 @@
+/**************************************************
+Assignment 10
+***************************************************/
+libname Agm10 'H:\MSFI 435\SAS\Lib\Agm10';
+
+%let wrds=wrds-cloud.wharton.upenn.edu 4016;
+options comamid=TCP remote=WRDS;
+signon username=_prompt_;
+
+* Download return data for all NYSE and AMEX securities from August 1964 thru August 1965;
+
+rsubmit;
+
+libname crsp '/wrds/crsp/sasdata/a_stock';
+
+data d;
+	set crsp.msf;
+	where hexcd=1 and "01AUG1964"d<=date<="31AUG1965"d or hexcd=2 and "01AUG1964"d<=date<="31AUG1965"d;
+	keep permno date ret;
+
+proc download data=d out=Agm10.msf;
+run;
+
+endrsubmit;
+
+*Keep in the sample only securities with valid return data for all months in the portfolio formation period;
+
+data Agm10.d;
+	set Agm10.msf;
+
+data Agm10.d;
+	set Agm10.d;
+
+	ym=year(date)*100+month(date);
+run;
+
+proc sort data=Agm10.d;
+	by permno;
+
+proc means data=Agm10.d noprint;
+	output out=Agm10.d_stats
+		n(ret)=n_ret;
+	by  permno;
+	where 196408<=ym<=196504;
+run;
+
+proc sql;
+create table Agm10.d as
+select
+	a.*,
+	b.n_ret
+from
+	Agm10.d as a,Agm10.d_stats as b
+where
+	a.permno=b.permno;
+
+data Agm10.d;
+	set Agm10.d;
+	where n_ret=9;
+run;
+
+* Get subsample of winners and losers and compute for each stock the average raw return during the portfolio formation period;
+
+proc means data=Agm10.d noprint;
+	by permno;
+	output out=Agm10.d_formret 
+		mean(ret)=formret;
+	where 196408<=ym<=196504;
+run;
+
+proc means data=Agm10.d_formret noprint;
+	output out=Agm10.d_formret_stats 
+		n(formret)=num_per_year;
+run;
+
+proc sql;
+create table Agm10.d_formret as
+select
+	a.*,
+	b.num_per_year
+from
+	Agm10.d_formret as a,Agm10.d_formret_stats as b
+order by
+	formret;
+
+data Agm10.d_formret;
+	set Agm10.d_formret;
+
+	seq=_n_;
+run;
+
+* Choose winners and losers;
+
+data Agm10.loser;
+	set Agm10.d_formret;
+	where seq<=0.1*num_per_year;
+
+data Agm10.winner;
+	set Agm10.d_formret;
+	where seq>=0.9*num_per_year;
+run;
+
+* Compute monthly average return for winners and losers for each month in the portfolio holding period;
+
+proc sql;
+create table Agm10.d_winner as
+select
+	a.*
+from
+	Agm10.d as a,Agm10.winner as b
+where
+	a.permno=b.permno and
+	196505<=a.ym<=196508
+order by
+	ym;
+
+proc means data=Agm10.d_winner noprint;
+	output out=Agm10.winner_stats 
+		mean(ret)=ar_winner;
+	by ym;
+run;
+
+proc sql;
+create table Agm10.d_loser as
+select
+	a.*
+from
+	Agm10.d as a,Agm10.loser as b
+where
+	a.permno=b.permno and
+	196505<=a.ym<=196508
+order by
+	ym;
+
+proc means data=Agm10.d_loser noprint;
+	output out=Agm10.loser_stats 
+		mean(ret)=ar_loser;
+	by ym;
+run;
+
+* Expand to 75 cycles;
+* Define portfolio dates (from excel and load in SAS);
+
+proc import datafile='H:\MSFI 435\SAS\Lib\Agm10\Portfolio formation.csv'
+	out=Agm10.Portfolio_formation;
+run;
+
+* Download return data for all NYSE and AMEX securities from August 1964 thru April 1990;
+
+%let wrds=wrds-cloud.wharton.upenn.edu 4016;
+options comamid=TCP remote=WRDS;
+signon username=_prompt_;
+
+rsubmit;
+
+libname crsp '/wrds/crsp/sasdata/a_stock';
+
+data d;
+	set crsp.msf;
+	where hexcd=1 and "01AUG1964"d<=date<="30APR1990"d or hexcd=2 and "01AUG1964"d<=date<="30APR1990"d;
+	keep permno date ret;
+
+proc download data=d out=Agm10.msf;
+run;
+
+endrsubmit;
+
+data Agm10.d;
+	set Agm10.msf;
+run;
+
+data Agm10.d;
+	set Agm10.d;
+
+	ym=year(date)*100+month(date);
+run;
+
+proc sort data=Agm10.d;
+	by ym;
+run;
+
+proc sql;
+create table Agm10.d as
+select 
+	a.ym_formation,
+	a.ym_left,
+	a.ym_right,
+	b.permno,
+	b.ret,
+	b.ym
+from
+	Agm10.portfolio_formation as a,Agm10.d as b 
+where
+	a.ym_left<=b.ym<=a.ym_right;
+
+* Keep in the sample only securities with valid return data;
+* for all months in the portfolio formation period;
+
+proc sort data=Agm10.d;
+ 	by ym_formation permno;
+run;
+
+proc means data=Agm10.d noprint;
+	output out=Agm10.d_stats 
+		n(ret)=n_ret;
+	by ym_formation permno;
+	where ym_left<=ym<=ym_formation;
+run;
+
+proc sql;
+create table Agm10.d as
+select
+	a.*,
+	b.n_ret
+from
+	Agm10.d as a,Agm10.d_stats as b
+where
+	a.ym_formation=b.ym_formation and 
+	a.permno=b.permno and
+	b.n_ret=9;
+
+* Get subsample of winners and losers and compute for each stock the average raw return during the portfolio formation period;
+
+proc sort data=Agm10.d;
+	by ym_formation permno;
+run;
+
+proc means data=Agm10.d noprint;
+	by ym_formation permno;
+	output out=Agm10.d_formret 
+		mean(ret)=formret;
+	where ym_left<=ym<=ym_formation;
+run;
+
+proc means data=Agm10.d_formret noprint;
+	output out=Agm10.d_formret_stats 
+		n(formret)=num_per_year;
+	by ym_formation;
+run;
+
+proc sql;
+create table Agm10.d_formret as
+select
+	a.*,
+	b.num_per_year
+from
+	Agm10.d_formret as a,Agm10.d_formret_stats as b
+where
+	a.ym_formation=b.ym_formation
+order by
+	ym_formation,formret;
+
+data Agm10.d_formret;
+	set Agm10.d_formret;
+	by ym_formation;
+
+	if first.ym_formation then
+		seq=1;
+	else
+		seq=seq+1;
+	retain seq;
+run;
+
+* Choose winners and losers;
+
+data Agm10.loser;
+	set Agm10.d_formret;
+	where seq<=0.1*num_per_year;
+
+data Agm10.winner;
+	set Agm10.d_formret;
+	where seq>=0.9*num_per_year;
+run;
+
+* Compute monthly average return for winners and losers for each month in the portfolio holding period;
+
+proc sql;
+create table Agm10.d_winner as
+select
+	a.*
+from
+	Agm10.d as a,Agm10.winner as b
+where
+	a.ym_formation=b.ym_formation and
+	a.permno=b.permno and
+	a.ym_formation<a.ym<=a.ym_right
+order by
+	ym_formation,ym;
+
+proc means data=Agm10.d_winner noprint;
+	output out=Agm10.winner_stats 
+		mean(ret)=ret_winner;
+	by ym_formation ym;
+run;
+
+proc sql;
+create table Agm10.d_loser as
+select
+	a.*
+from
+	Agm10.d as a,Agm10.loser as b
+where
+	a.ym_formation=b.ym_formation and
+	a.permno=b.permno and
+	a.ym_formation<a.ym<=a.ym_right
+order by
+	ym_formation,ym;
+
+proc means data=Agm10.d_loser noprint;
+	output out=Agm10.loser_stats 
+		mean(ret)=ret_loser;
+	by ym_formation ym;
+run;
+
+* Test performance of winners and losers;
+
+data Agm10.d_ret;
+	merge Agm10.loser_stats Agm10.winner_stats;
+	by ym_formation ym;
+
+	dr=ret_winner-ret_loser;
+run;
+
+proc means data=Agm10.d_ret noprint;
+	output out=Agm10.d_stats
+		mean(ret_winner ret_loser dr)=aret_winner aret_loser adr
+ 		probt(ret_winner ret_loser dr)=paret_winner paret_loser padr;
+run;
+
+* Expend cycles from 75 to 105;
+* Define portfolio dates (from excel and load in SAS);
+
+proc import datafile='H:\MSFI 435\SAS\Lib\Agm10\Portfolio formation2.csv'
+	out=Agm10.Portfolio_formation;
+run;
+
+* Download return data for all NYSE and AMEX securities from August 1964 thru April 2000;
+
+%let wrds=wrds-cloud.wharton.upenn.edu 4016;
+options comamid=TCP remote=WRDS;
+signon username=_prompt_;
+
+rsubmit;
+
+libname crsp '/wrds/crsp/sasdata/a_stock';
+
+data d;
+	set crsp.msf;
+	where hexcd=1 and "01AUG1964"d<=date<="30APR2000"d or hexcd=2 and "01AUG1964"d<=date<="30APR2000"d;
+	keep permno date ret;
+
+proc download data=d out=Agm10.msf;
+run;
+
+endrsubmit;
+
+data Agm10.d;
+	set Agm10.msf;
+run;
+
+data Agm10.d;
+	set Agm10.d;
+
+	ym=year(date)*100+month(date);
+run;
+
+proc sort data=Agm10.d;
+	by ym;
+run;
+
+proc sql;
+create table Agm10.d as
+select 
+	a.ym_formation,
+	a.ym_left,
+	a.ym_right,
+	b.permno,
+	b.ret,
+	b.ym
+from
+	Agm10.portfolio_formation as a,Agm10.d as b 
+where
+	a.ym_left<=b.ym<=a.ym_right;
+
+* Keep in the sample only securities with valid return data;
+* for all months in the portfolio formation period;
+
+proc sort data=Agm10.d;
+ 	by ym_formation permno;
+run;
+
+proc means data=Agm10.d noprint;
+	output out=Agm10.d_stats 
+		n(ret)=n_ret;
+	by ym_formation permno;
+	where ym_left<=ym<=ym_formation;
+run;
+
+proc sql;
+create table Agm10.d as
+select
+	a.*,
+	b.n_ret
+from
+	Agm10.d as a,Agm10.d_stats as b
+where
+	a.ym_formation=b.ym_formation and 
+	a.permno=b.permno and
+	b.n_ret=9;
+
+* Get subsample of winners and losers and compute for each stock the average raw return during the portfolio formation period;
+
+proc sort data=Agm10.d;
+	by ym_formation permno;
+run;
+
+proc means data=Agm10.d noprint;
+	by ym_formation permno;
+	output out=Agm10.d_formret 
+		mean(ret)=formret;
+	where ym_left<=ym<=ym_formation;
+run;
+
+proc means data=Agm10.d_formret noprint;
+	output out=Agm10.d_formret_stats 
+		n(formret)=num_per_year;
+	by ym_formation;
+run;
+
+proc sql;
+create table Agm10.d_formret as
+select
+	a.*,
+	b.num_per_year
+from
+	Agm10.d_formret as a,Agm10.d_formret_stats as b
+where
+	a.ym_formation=b.ym_formation
+order by
+	ym_formation,formret;
+
+data Agm10.d_formret;
+	set Agm10.d_formret;
+	by ym_formation;
+
+	if first.ym_formation then
+		seq=1;
+	else
+		seq=seq+1;
+	retain seq;
+run;
+
+* Choose winners and losers;
+
+data Agm10.loser;
+	set Agm10.d_formret;
+	where seq<=0.1*num_per_year;
+
+data Agm10.winner;
+	set Agm10.d_formret;
+	where seq>=0.9*num_per_year;
+run;
+
+* Compute monthly average return for winners and losers for each month in the portfolio holding period;
+
+proc sql;
+create table Agm10.d_winner as
+select
+	a.*
+from
+	Agm10.d as a,Agm10.winner as b
+where
+	a.ym_formation=b.ym_formation and
+	a.permno=b.permno and
+	a.ym_formation<a.ym<=a.ym_right
+order by
+	ym_formation,ym;
+
+proc means data=Agm10.d_winner noprint;
+	output out=Agm10.winner_stats 
+		mean(ret)=ret_winner;
+	by ym_formation ym;
+run;
+
+proc sql;
+create table Agm10.d_loser as
+select
+	a.*
+from
+	Agm10.d as a,Agm10.loser as b
+where
+	a.ym_formation=b.ym_formation and
+	a.permno=b.permno and
+	a.ym_formation<a.ym<=a.ym_right
+order by
+	ym_formation,ym;
+
+proc means data=Agm10.d_loser noprint;
+	output out=Agm10.loser_stats 
+		mean(ret)=ret_loser;
+	by ym_formation ym;
+run;
+
+* Test performance of winners and losers;
+
+data Agm10.d_ret;
+	merge Agm10.loser_stats Agm10.winner_stats;
+	by ym_formation ym;
+
+	dr=ret_winner-ret_loser;
+run;
+
+proc means data=Agm10.d_ret noprint;
+	output out=Agm10.d_stats
+		mean(ret_winner ret_loser dr)=aret_winner aret_loser adr
+ 		probt(ret_winner ret_loser dr)=paret_winner paret_loser padr;
+run;
